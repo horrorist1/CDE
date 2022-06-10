@@ -1,0 +1,34 @@
+version: "2.4"
+
+services:
+  runner:
+    image: runner:1
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+      args:
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+  builder:
+    image: builder:1
+    build:
+      context: .
+      dockerfile: Dockerfile.builder
+      args:
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+    depends_on:
+      - runner
+  developer:
+    image: developer:1
+    build:
+      context: .
+      dockerfile: Dockerfile.developer
+      args:
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+    depends_on:
+      - builder

@@ -1,0 +1,20 @@
+FROM developer:1
+
+WORKDIR /work
+
+ARG USER_ID
+ARG GROUP_ID
+ARG HOST_USER
+
+ENV PS1 "[\u@\h \W]\$ "
+
+RUN groupadd -g ${GROUP_ID} ${HOST_USER} && \
+    useradd --no-log-init -g ${GROUP_ID} -u ${USER_ID} -d /home/${HOST_USER} -s /bin/bash -m ${HOST_USER} && \
+    usermod -a -G sudo ${HOST_USER} && \
+    echo "%sudo  ALL=(ALL)       NOPASSWD: ALL" > /etc/sudoers && \
+    echo "export PATH=/usr/local/bin:$PATH" > /etc/bashrc
+
+USER ${USER_ID}:${GROUP_ID}
+
+COPY basic-entrypoint.sh /usr/local/bin/
+ENTRYPOINT ["basic-entrypoint.sh"]

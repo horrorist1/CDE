@@ -1,0 +1,71 @@
+#!/bin/bash
+
+cde_usage() {
+    cat <<EOF
+    Usage: source init_cde <[options]>
+
+    Without arguments, set current directory as CDE root, activate CDE management toolset, only for current login.
+
+    <options> are:
+    --help      , -h        -- print this help and exit
+    --save      , -s        -- automatically initialize CDE for current and subsequent login shells (in ~/.bash_profile)
+    --deinit    , -d        -- unset CDE root and toolset path for current and subsequent login shells
+
+    Note: CDE management tool sets python3.6.0 as Python interpreter for LinSEE environment
+
+EOF
+}
+
+cde_deinit() {
+    if [[ -n ${CDE_ROOT} ]]; then
+        if [ -s ~/.bash_profile ]; then
+            sed -i '/.*source init_cde.*$/d' ~/.bash_profile
+        fi
+        PATH="${PATH//${CDE_ROOT}\/tools:/}"
+        PS1="${OLD_PS1}"
+        unset CDE_ROOT OLD_PS1 cde_usage cde_deinit cde_init cde_save
+    fi
+}
+
+cde_init() {
+    if ! command -v python3 &> /dev/null ; then
+        echo "Error: No python found." >&2
+        return 1
+    fi
+
+    if [[ -f "${PWD}"/tools/cmt ]]; then
+        cde_deinit
+        export CDE_ROOT="${PWD}"
+        export OLD_PS1="${PS1}"
+        PS1="[\u@\[\e[32m\]CDE\[\e[m\]-\h \W]\$ "
+        PATH="${CDE_ROOT}/tools:$PATH"
+        echo "CDE initialized."
+        echo "Type 'cmt --help'"
+    else
+        echo "Error: <CDE>/tools/cmt is not found. Please run from CDE root." >&2
+        return 1
+    fi
+}
+
+cde_save() {
+    cde_init
+    echo -e "if [[ \${HOSTNAME} == ${HOSTNAME} ]] ; then CDE_ROOT=${CDE_ROOT}; cd ${CDE_ROOT}; source init_cde -s; cmt run; fi" >> ~/.bash_profile
+}
+
+if [[ "${0##*/}" == init_cde ]] ; then
+    echo "Error: The script must be sourced!" >&2
+    cde_usage
+    exit 1
+fi
+
+if [[ $# -ne 0 ]]; then
+    CDE_ARG="$1"
+    case "$CDE_ARG" in
+        --help|-h)   cde_usage ;;
+        --save|-s)   cde_save ;;
+        --deinit|-d) cde_deinit ;;
+        *)           printf "Error: %s : unknown option " "$CDE_ARG" >&2 ; cde_usage ; return 1 ;;
+    esac
+else
+    cde_init
+fi

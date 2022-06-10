@@ -1,0 +1,31 @@
+version: "2.4"
+
+services:
+  cde:
+    image: cde:1
+    env_file:
+        .env
+    build:
+      context: .
+      dockerfile: Dockerfile.cde
+      args:
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy: ${no_proxy}
+    hostname: cde
+    volumes:
+      - type: bind
+        source: .
+        target: /home/${HOST_USER}/CDE
+      - "./docker:/var/lib/docker"
+      - type: bind
+        source: /etc/inputrc
+        target: /etc/inputrc
+        read_only: true
+      - type: bind
+        source: ${HOST_HOME}/.ssh
+        target: /home/${HOST_USER}/.ssh
+      - type: bind
+        source: ${HOST_HOME}/.gitconfig
+        target: /home/${HOST_USER}/.gitconfig
+    privileged: true

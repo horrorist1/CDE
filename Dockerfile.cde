@@ -1,0 +1,23 @@
+FROM docker:dind
+RUN apk update && \
+    apk add --no-cache python3 \
+        py-pip \
+        bash \
+        vim \
+        less \
+        ncurses \
+        shadow \
+        sudo \
+        git \
+        openssh \
+        docker \
+        docker-compose
+
+ENV PS1 "[\[\e[36m\]CDE\[\e[m\]#\h \W]\$ "
+
+COPY cde-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/cde-entrypoint.sh
+
+COPY bashrc /root/.bashrc
+
+ENTRYPOINT ["cde-entrypoint.sh"]

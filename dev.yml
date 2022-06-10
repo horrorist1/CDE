@@ -1,0 +1,52 @@
+version: "2.4"
+
+services:
+  dev: &dev
+    command: tail -f /dev/null
+    image: dev
+    init: true
+    env_file:
+      .env
+    container_name: dev-basic
+    build:
+      context: .
+      dockerfile: Dockerfile.basic
+      args:
+        USER_ID: ${USER_ID}
+        GROUP_ID: ${GROUP_ID}
+        HOST_USER: ${HOST_USER}
+    hostname: dev-basic
+    volumes:
+      - type: bind
+        source: ./repos
+        target: /work
+      - type: bind
+        source: ./bash_history
+        target: /home/${HOST_USER}/.bash_history
+    privileged: true
+
+  dev_1:
+    <<: *dev
+    container_name: dev-1
+    hostname: dev-1
+    networks:
+      app_net:
+        ipv4_address: 10.10.10.2
+
+  dev_2:
+    <<: *dev
+    container_name: dev-2
+    hostname: dev-2
+    networks:
+      app_net:
+        ipv4_address: 10.10.10.3
+
+networks:
+  app_net:
+    driver: bridge 
+    enable_ipv6: false
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.10.10.0/8
+          gateway: 10.10.10.1

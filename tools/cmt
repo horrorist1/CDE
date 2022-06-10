@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+
+import argparse
+import logging
+import json
+import os
+import shutil
+import subprocess
+
+version='1.0.0'
+
+
+class CmtInterface(object):
+    fenv = str
+    fssh = str
+    fgitconfig = str
+    fbashrc = str
+
+    def __init__(self):
+        self.cde_root = os.environ.get('CDE_ROOT')
+        self.fenv = f'{self.cde_root}/.env'
+        self.fssh = f'{self.cde_root}/.ssh'
+        self.fgitconfig = f'{self.cde_root}/.gitconfig'
+        self.fbashrc = f'{self.cde_root}/.bashrc'
+        self.user = os.environ.get('USER')
+        self.userid = os.getuid()
+        self.groupid = os.getgid()
+
+    @staticmethod
+    def get_cde_mount(user, container_name):
+        status, output_string = subprocess.getstatusoutput('sudo docker inspect %s --format \'{{json .}}\'' % container_name)
+        if status == 0:
+            try:
+                container = json.loads(output_string)
+                return [mount for mount in container['Mounts'] if mount['Destination'] == os.path.join('/home', user, 'CDE')][0]['Source']
+            except (json.JSONDecodeError, IndexError) as e:
+                logging.debug(str(e))
+                pass
+
+        return None
+
+    def exec(self, args):
+        if args.debug:
+            logging.basicConfig(level=logging.DEBUG)
+
+
+class CMTHost(CmtInterface):
+    def __parse__(self):
+        parser = argparse.ArgumentParser(description=f'CDE host management tool {version}')
+
+        parser.add_argument('-d', '--debug', help='Debug output', action='store_true')
+
+        parser.command = None
+
+        subparsers = parser.add_subparsers(description='commands', dest='command')
+
+        subparsers.add_parser('init', help='Initialize CDE environment, must be run once.')
+        subparsers.add_parser('deinit', help='Deinitialize CDE environment.')
+
+        run_parser = subparsers.add_parser('run', help='Creates new instance of CDE, prints it\'s NAME and launches console.')
+        run_parser.add_argument('NAME', help='Optional name of CDE instance.', nargs='?', type=str)
+        run_parser.add_argument('--detached', action='store_true')
+
+        delete_parser = subparsers.add_parser('delete', help='Delete existing instance of CDE selected by NAME.')
+        delete_parser.add_argument('NAME', help='Name of CDE instance to be deleted.', type=str)
+        delete_parser.add_argument('--quiet', action='store_true')
+
+        subparsers.add_parser('list', help='List all CDE instances.')
+
+        subparsers.add_parser('status', help='Print CDE working directory.')
+
+        return parser.parse_args()
+
+    def cmd_init(self, args):
+        home = os.environ.get("HOME")
+
+        with open(self.fenv, 'w') as f:
+            if "http_proxy" in os.environ:
+                f.write(f'http_proxy={os.environ.get("http_proxy")}\n')
+            if "https_proxy" in os.environ:
+                f.write(f'https_proxy={os.environ.get("https_proxy")}\n')
+            if "no_proxy" in os.environ:
+                f.write(f'no_proxy={os.environ.get("no_proxy")}\n')
+            f.write(f'HOST_USER={self.user}\n')
+            f.write(f'USER_ID={self.userid}\n')
+            f.write(f'GROUP_ID={self.groupid}\n')
+            f.write(f'HOST_HOME={home}\n')
+
+        return 0
+
+    def cmd_deinit(self, args):
+        if os.path.exists(self.fenv):
+            os.remove(self.fenv)
+
+        return 0
+
+    def cmd_run(self, args):
+        self.cmd_init(args)
+        cde_name = args.NAME
+        detached = args.detached
+        output = subprocess.getoutput('sudo docker ps -a --format \'{{json .}}\'')
+
+        if cde_name is None:
+            if os.path.exists(os.path.join(self.cde_root, 'docker')):
+                for cont_entry in output.split('\n'):
+                    cont = json.loads(cont_entry)
+                    cde_name = cont['Names']
+                    mount = CmtInterface.get_cde_mount(self.user, cont['Names'])
+                    if mount == self.cde_root:
+                        container_status = cont['Status']
+                        if container_status.startswith('Exited') is True:
+                            status, output = subprocess.getstatusoutput(f'sudo docker start {cde_name}')
+                            if status != 0:
+                                logging.error(
+                                    f'Error, couldn\'t start exited CDE \'{cde_name}\', check container status')
+                                return 1
+                        elif not container_status.startswith('Up'):
+                            logging.critical(f'Unknown status \'{container_status}\' of container \'{cde_name}\'.')
+                            return 1
+
+                        status = os.system(f'sudo docker exec -ti {cde_name} bash')
+
+                        return 0
+
+            names = subprocess.getoutput('sudo docker ps -a --format \'{{.Names}}\'').split('\n')
+            numbers = [name.split('_')[1] for name in names if name.startswith(self.user + '_')]
+            numbers = [int(number) for number in numbers if number.isdigit()]
+            available_number = [x for x in range(1, max(numbers or [1]) + 2) if x not in numbers][0]
+            cde_name = '_'.join([self.user, str(available_number)])
+
+            saved_path = os.getcwd()
+            os.chdir(self.cde_root)
+            status, output = subprocess.getstatusoutput(
+                f'sudo docker-compose -f cde.yml run --name {cde_name} -d cde')
+            os.chdir(saved_path)
+
+            if status != 0:
+                print(f'Error creating CDE, performing cleanup.')
+                logging.debug(output)
+                args.NAME = cde_name
+                self.cmd_delete(args, quiet=True)
+                return 1
+
+            status, output = subprocess.getstatusoutput(
+                f'sudo docker exec {cde_name} hostname {cde_name}')
+
+            if status != 0:
+                print(f'Error creating CDE, performing cleanup.')
+                logging.debug(output)
+                args.NAME = cde_name
+                self.cmd_delete(args, quiet=True)
+                return 1
+
+        output = subprocess.getoutput('sudo docker ps -a --format \'{{json .}}\'')
+        found = False
+        for cont_entry in output.split('\n'):
+            cont = json.loads(cont_entry)
+            if cont['Names'] == cde_name:
+                found = True
+                container_status = cont['Status']
+                if container_status.startswith('Exited') is True:
+                    status, output = subprocess.getstatusoutput(f'sudo docker start {cde_name}')
+                    if status != 0:
+                        logging.error(f'Error, couldn\'t start exited CDE \'{cde_name}\', check container status')
+                        return 1
+                elif not container_status.startswith('Up'):
+                    logging.critical(f'Unknown status \'{container_status}\' of container \'{cde_name}\'.')
+                    return 1
+
+                if not detached:
+                    status = os.system(f'sudo docker exec -ti {cde_name} bash')
+
+        if not found:
+            print(f'Container \'{cde_name}\' not found.')
+            logging.debug(output)
+            return 1
+
+        return 0
+
+    def cmd_delete(self, args, quiet=False):
+        quiet = quiet or args.quiet
+        name = args.NAME
+        if not name.startswith(self.user):
+            print('You cannot delete containers that are not assigned to you!')
+            return 1
+
+        mount = CmtInterface.get_cde_mount(self.user, name)
+        if name is not None:
+            confirmed = input(f'Are you sure you want to delete {name}? [y/N] ') if quiet is False else 'y'
+            if confirmed == 'y':
+                status, output = subprocess.getstatusoutput(f'sudo docker rm -f {name}')
+                if status == 0:
+                    status, output = subprocess.getstatusoutput(
+                        f'sudo docker run --rm -it -v {mount}:/CDE alpine rm -rf /CDE/docker')
+                    if status == 0:
+                        if quiet is False:
+                            print(f'Successfully deleted CDE \' {name}\'.')
+                    else:
+                        print('Error removing docker cache at %s.' % os.path.join(mount, 'docker'))
+                        logging.debug(output)
+                        return 1
+                else:
+                    print(f'Error deleting \'{name}\', does it exist? Run \'cmt list\' for the list of CDEs.')
+                    logging.debug(output)
+                    return 1
+
+                self.cmd_deinit(args)
+        return 0
+
+
+    def cmd_list(self, args):
+        output = subprocess.getoutput('sudo docker ps -a --format \'{{json .}}\'')
+        titles = ['Curr', 'Names', 'Image', 'Created', 'Running', 'Mount point']
+        containers = []
+        if len(output):
+            for cont_entry in output.split('\n'):
+                cont = json.loads(cont_entry)
+                if cont['Names'].startswith(self.user + '_'):
+                    mount = CmtInterface.get_cde_mount(self.user, cont['Names'])
+                    container = ['->' if mount == self.cde_root else '   ',
+                                cont['Names'],
+                                 cont['Image'],
+                                 cont['CreatedAt'][:19],
+                                 cont['Status'],
+                                 mount]
+                    containers.append(container)
+
+        if len(containers) > 0:
+            pads = []
+            for i in range(0, len(containers[0])):
+                pads.append(max([len(entry) for entry in [data[i] for data in containers]]))
+
+            data = [titles] + containers
+            for i, d in enumerate(data):
+                line = ' '.join(str(x).ljust(pads[j] + 4) for j, x in enumerate(d))
+                print(line)
+
+        else:
+            print('No containers.')
+
+        return 0
+
+    def cmd_status(self, args):
+        print(f'CDE working directory is \'{self.cde_root}\'')
+        return 0
+
+    def exec(self):
+        if self.cde_root is None:
+            print('CDE_ROOT is not set! Source \'init_cde\' first.')
+            return 1
+
+        args = self.__parse__()
+
+        super().exec(args)
+
+        commands = {
+            'init': self.cmd_init,
+            'deinit': self.cmd_deinit,
+            'run': self.cmd_run,
+            'delete': self.cmd_delete,
+            'list': self.cmd_list,
+            'status': self.cmd_status,
+            None: self.cmd_status
+        }
+        return commands[args.command](args)
+
+
+def main():
+    if os.environ.get('DIND_COMMIT') is None:
+        return CMTHost().exec()
+    else:
+        print('cmt not available in DinD')
+        return 1
+
+
+if __name__== "__main__":
+    exit(main())
+
+

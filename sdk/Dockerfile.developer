@@ -1,0 +1,20 @@
+FROM builder:1
+RUN apt install -y strace \
+                   vim \
+                   lsof \
+                   man \
+                   dos2unix \
+                   htop \
+                   linux-tools-common \
+                   gdb \
+                   git-core \
+                   patch \
+                   file \
+                   pigz \
+                   rsync \
+                   doxygen \
+                   graphviz \
+                   shellcheck \
+		   traceroute \
+                   iputils-ping \
+		   iproute2
