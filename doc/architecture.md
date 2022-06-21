@@ -9,7 +9,7 @@ how Docker works:
 - *Docker container* - the running instance of a **Docker** image. There can be multiple instances
   of the same image.
 - *Docker image* - the package produced by **Docker** build. It contains all executable files and
-  environment, i.e. CentOS 7 and applications. **Docker** images can inherit from each other, thus
+  environment, i.e. Ubuntu Latest and applications. **Docker** images can inherit from each other, thus
   they inherit all **Docker** image layers from the parent image.
 - *Docker image layer* - **Docker** images are formed by layers, which basically are increments to
   the filesystem.

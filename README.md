@@ -20,7 +20,5 @@ For more detailed instruction you can read the [full user manual](./doc/full_man
 
 ## Developer manual
 
-- [How to contribute](./CONTRIBUTING.md)
 - [Server setup](./doc/server.md)
-- [Setup local registry](./doc/registry.md)
 - [Updating SDK](./doc/update_sdk.md)
